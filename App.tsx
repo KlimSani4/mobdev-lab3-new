@@ -1,20 +1,94 @@
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Text } from 'react-native';
+import type { RootStackParamList, MainTabParamList } from './src/types';
+import {
+  TaskListScreen,
+  TaskDetailScreen,
+  ProfileScreen,
+  CreateTaskScreen,
+} from './src/screens';
+import { ErrorBoundary } from './src/components';
 
-export default function App() {
+const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator<MainTabParamList>();
+
+function MainTabs() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <Tab.Navigator
+      screenOptions={{
+        tabBarActiveTintColor: '#6200EE',
+        tabBarInactiveTintColor: '#999',
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '500' },
+        headerStyle: { backgroundColor: '#6200EE' },
+        headerTintColor: '#FFF',
+        headerTitleStyle: { fontWeight: '600' },
+      }}
+    >
+      <Tab.Screen
+        name="TaskList"
+        component={TaskListScreen}
+        options={{
+          title: 'Задачи',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 24, color }}>📋</Text>
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="CreateTask"
+        component={CreateTaskScreen}
+        options={{
+          title: 'Создать',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 24, color }}>➕</Text>
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'Профиль',
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 24, color }}>👤</Text>
+          ),
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <Stack.Navigator
+            screenOptions={{
+              headerStyle: { backgroundColor: '#6200EE' },
+              headerTintColor: '#FFF',
+              headerTitleStyle: { fontWeight: '600' },
+            }}
+          >
+            <Stack.Screen
+              name="MainTabs"
+              component={MainTabs}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="TaskDetail"
+              component={TaskDetailScreen}
+              options={{ title: 'Детали задачи' }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+        <StatusBar style="light" />
+      </SafeAreaProvider>
+    </ErrorBoundary>
+  );
+}
