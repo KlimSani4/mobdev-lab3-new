@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { colors, spacing, borderRadius, shadows } from '../utils/theme';
 
 interface ErrorStateProps {
   message: string;
@@ -9,11 +10,19 @@ interface ErrorStateProps {
 export function ErrorState({ message, onRetry }: ErrorStateProps) {
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>⚠️</Text>
+      <View style={styles.iconContainer}>
+        <View style={styles.iconBackground}>
+          <Text style={styles.icon}>⚠️</Text>
+        </View>
+      </View>
       <Text style={styles.title}>Что-то пошло не так</Text>
       <Text style={styles.message}>{message}</Text>
       {onRetry && (
-        <TouchableOpacity style={styles.button} onPress={onRetry}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={onRetry}
+          activeOpacity={0.7}
+        >
           <Text style={styles.buttonText}>Повторить</Text>
         </TouchableOpacity>
       )}
@@ -26,33 +35,48 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: spacing.xxxl,
+    backgroundColor: colors.background,
+  },
+  iconContainer: {
+    marginBottom: spacing.xl,
+  },
+  iconBackground: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: `${colors.error}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   icon: {
     fontSize: 48,
-    marginBottom: 16,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
   },
   message: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
+    color: colors.text.secondary,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.xl,
+    lineHeight: 22,
+    maxWidth: 280,
   },
   button: {
-    backgroundColor: '#6200EE',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    ...shadows.small,
   },
   buttonText: {
-    color: '#FFF',
+    color: colors.text.inverse,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
 });

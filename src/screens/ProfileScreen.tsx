@@ -1,3 +1,12 @@
+/**
+ * ProfileScreen - экран профиля пользователя
+ *
+ * Современный дизайн с:
+ * - Градиентной рамкой аватара
+ * - Карточками статистики
+ * - Секцией достижений
+ * - Прогресс-баром кармы
+ */
 import React, { useState } from 'react';
 import {
   View,
@@ -8,25 +17,86 @@ import {
   StyleSheet,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useUserProfile, useImagePicker } from '../hooks';
-import { LoadingState } from '../components';
-import { formatPhone, getKarmaLevel } from '../utils/helpers';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../contexts/AuthContext';
+import { useImagePicker } from '../hooks';
+import { updateUserProfile } from '../api/users';
+import { formatPhone } from '../utils/helpers';
 import { KARMA_THRESHOLDS } from '../utils/constants';
+import { colors, spacing, borderRadius, shadows } from '../utils/theme';
+
+// Achievement badges configuration
+const ACHIEVEMENTS = [
+  { id: 'first_task', icon: '🎯', title: 'Первая задача', description: 'Создана первая задача' },
+  { id: 'helper', icon: '🤝', title: 'Помощник', description: 'Помог 5 соседям' },
+  { id: 'popular', icon: '⭐', title: 'Популярный', description: 'Получено 10 откликов' },
+  { id: 'veteran', icon: '🏆', title: 'Ветеран', description: 'В сообществе 30 дней' },
+];
 
 export function ProfileScreen() {
-  const { profile, loading, updateProfile, resetProfile } = useUserProfile();
-  const { imageUri, showPicker } = useImagePicker(profile.avatar_url);
+  const { user, logout, refreshUser, loading, isGuest, requireAuth } = useAuth();
+  const { imageUri, showPicker } = useImagePicker(user?.avatar ?? undefined);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Показываем загрузку только если идёт проверка авторизации
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Загрузка профиля...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Если пользователь не авторизован - показываем экран приглашения войти
+  if (isGuest || !user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.guestContainer}>
+          <View style={styles.guestAvatarWrapper}>
+            <LinearGradient
+              colors={[colors.primary, colors.secondary]}
+              style={styles.guestAvatarGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.guestAvatarInner}>
+                <Text style={styles.guestAvatarText}>?</Text>
+              </View>
+            </LinearGradient>
+          </View>
+          <Text style={styles.guestTitle}>Войдите в аккаунт</Text>
+          <Text style={styles.guestSubtitle}>
+            Чтобы просматривать профиль, создавать задачи и откликаться на
+            просьбы соседей
+          </Text>
+          <TouchableOpacity style={styles.loginButton} onPress={requireAuth}>
+            <LinearGradient
+              colors={[colors.primary, colors.primaryDark]}
+              style={styles.loginButtonGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.loginButtonText}>Войти или зарегистрироваться</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const startEditing = () => {
-    setEditName(profile.name);
-    setEditPhone(profile.phone);
+    setEditName(user.name);
+    setEditPhone(user.phone);
     setIsEditing(true);
   };
 
@@ -44,12 +114,14 @@ export function ProfileScreen() {
 
     try {
       setSaving(true);
-      await updateProfile({
+      await updateUserProfile(user.id, {
         name: editName.trim(),
         phone: editPhone.trim(),
-        avatar_url: imageUri,
+        avatar: imageUri ?? undefined,
       });
+      await refreshUser();
       setIsEditing(false);
+      Alert.alert('Успех', 'Профиль обновлён');
     } catch {
       Alert.alert('Ошибка', 'Не удалось сохранить профиль');
     } finally {
@@ -57,73 +129,152 @@ export function ProfileScreen() {
     }
   };
 
-  const handleReset = () => {
+  const handleLogout = () => {
     Alert.alert(
-      'Сброс профиля',
-      'Вы уверены? Все данные будут удалены.',
+      'Выход',
+      'Вы уверены, что хотите выйти?',
       [
         { text: 'Отмена', style: 'cancel' },
         {
-          text: 'Сбросить',
+          text: 'Выйти',
           style: 'destructive',
-          onPress: resetProfile,
+          onPress: logout,
         },
       ]
     );
   };
 
   const getProgressInfo = () => {
-    const karma = profile.karma;
+    const karma = user.karma;
     let nextThreshold: number;
     let nextLevel: string;
+    let prevThreshold: number = 0;
 
     if (karma < KARMA_THRESHOLDS.NEIGHBOR) {
+      prevThreshold = 0;
       nextThreshold = KARMA_THRESHOLDS.NEIGHBOR;
       nextLevel = 'Сосед';
     } else if (karma < KARMA_THRESHOLDS.HELPER) {
+      prevThreshold = KARMA_THRESHOLDS.NEIGHBOR;
       nextThreshold = KARMA_THRESHOLDS.HELPER;
       nextLevel = 'Добряк';
     } else if (karma < KARMA_THRESHOLDS.LEGEND) {
+      prevThreshold = KARMA_THRESHOLDS.HELPER;
       nextThreshold = KARMA_THRESHOLDS.LEGEND;
       nextLevel = 'Легенда подъезда';
     } else {
       return null;
     }
 
-    const progress = (karma / nextThreshold) * 100;
+    const progress = ((karma - prevThreshold) / (nextThreshold - prevThreshold)) * 100;
     const remaining = nextThreshold - karma;
 
     return { nextLevel, progress, remaining };
   };
 
-  if (loading) {
-    return <LoadingState message="Загружаем профиль..." />;
-  }
-
   const progressInfo = getProgressInfo();
-  const avatarUri = imageUri || profile.avatar_url;
+  const avatarUri = imageUri || user.avatar;
+
+  // Stats data
+  const tasksCreated = user._count?.tasks ?? 0;
+  const tasksHelped = user._count?.responses ?? 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.avatarContainer}>
-          <TouchableOpacity onPress={showPicker}>
-            {avatarUri ? (
-              <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
-            ) : (
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {profile.name.charAt(0).toUpperCase()}
-                </Text>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Avatar Section with Gradient Border */}
+        <View style={styles.avatarSection}>
+          <TouchableOpacity onPress={isEditing ? showPicker : undefined}>
+            <LinearGradient
+              colors={[colors.primary, colors.secondary]}
+              style={styles.avatarGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.avatarInner}>
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarText}>
+                    {user.name.charAt(0).toUpperCase()}
+                  </Text>
+                )}
+              </View>
+            </LinearGradient>
+            {isEditing && (
+              <View style={styles.editBadge}>
+                <Text style={styles.editBadgeText}>📷</Text>
               </View>
             )}
-            <View style={styles.editBadge}>
-              <Text style={styles.editBadgeText}>📷</Text>
-            </View>
           </TouchableOpacity>
-          <Text style={styles.level}>{profile.level}</Text>
+
+          <Text style={styles.userName}>{user.name}</Text>
+
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelText}>{user.level}</Text>
+          </View>
         </View>
 
+        {/* Stats Cards */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{tasksCreated}</Text>
+            <Text style={styles.statLabel}>Создано задач</Text>
+          </View>
+
+          <View style={[styles.statCard, styles.statCardPrimary]}>
+            <Text style={styles.statValueKarma}>{user.karma}</Text>
+            <Text style={styles.statLabelKarma}>Карма</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{tasksHelped}</Text>
+            <Text style={styles.statLabel}>Помог раз</Text>
+          </View>
+        </View>
+
+        {/* Progress Section */}
+        {progressInfo && (
+          <View style={styles.progressSection}>
+            <View style={styles.progressHeader}>
+              <Text style={styles.progressTitle}>Прогресс</Text>
+              <Text style={styles.progressRemaining}>
+                {progressInfo.remaining} до «{progressInfo.nextLevel}»
+              </Text>
+            </View>
+            <View style={styles.progressBar}>
+              <LinearGradient
+                colors={[colors.primary, colors.secondary]}
+                style={[styles.progressFill, { width: `${Math.min(progressInfo.progress, 100)}%` }]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Achievements Section */}
+        <View style={styles.achievementsSection}>
+          <Text style={styles.sectionTitle}>Достижения</Text>
+          <View style={styles.achievementsGrid}>
+            {ACHIEVEMENTS.map((achievement, index) => {
+              const isUnlocked = index < 2; // Mock: first 2 unlocked
+              return (
+                <View
+                  key={achievement.id}
+                  style={[styles.achievementCard, !isUnlocked && styles.achievementLocked]}
+                >
+                  <Text style={styles.achievementIcon}>{achievement.icon}</Text>
+                  <Text style={[styles.achievementTitle, !isUnlocked && styles.achievementTitleLocked]}>
+                    {achievement.title}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Edit Form or Info Display */}
         {isEditing ? (
           <View style={styles.form}>
             <Text style={styles.label}>Имя</Text>
@@ -132,6 +283,7 @@ export function ProfileScreen() {
               value={editName}
               onChangeText={setEditName}
               placeholder="Введите имя"
+              placeholderTextColor={colors.text.tertiary}
               autoCapitalize="words"
             />
 
@@ -141,6 +293,7 @@ export function ProfileScreen() {
               value={editPhone}
               onChangeText={setEditPhone}
               placeholder="+7-XXX-XXX-XX-XX"
+              placeholderTextColor={colors.text.tertiary}
               keyboardType="phone-pad"
             />
 
@@ -165,44 +318,32 @@ export function ProfileScreen() {
           </View>
         ) : (
           <View style={styles.info}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Имя</Text>
-              <Text style={styles.infoValue}>{profile.name}</Text>
-            </View>
-
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Телефон</Text>
-              <Text style={styles.infoValue}>{formatPhone(profile.phone)}</Text>
-            </View>
-
-            <View style={styles.karmaBlock}>
-              <Text style={styles.karmaLabel}>Карма</Text>
-              <Text style={styles.karmaValue}>{profile.karma}</Text>
-            </View>
-
-            {progressInfo && (
-              <View style={styles.progressBlock}>
-                <Text style={styles.progressText}>
-                  До уровня «{progressInfo.nextLevel}» осталось{' '}
-                  {progressInfo.remaining} кармы
-                </Text>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${Math.min(progressInfo.progress, 100)}%` },
-                    ]}
-                  />
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoIcon}>👤</Text>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Имя</Text>
+                  <Text style={styles.infoValue}>{user.name}</Text>
                 </View>
               </View>
-            )}
+
+              <View style={styles.infoDivider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoIcon}>📞</Text>
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Телефон</Text>
+                  <Text style={styles.infoValue}>{formatPhone(user.phone)}</Text>
+                </View>
+              </View>
+            </View>
 
             <TouchableOpacity style={styles.editButton} onPress={startEditing}>
-              <Text style={styles.editButtonText}>Редактировать</Text>
+              <Text style={styles.editButtonText}>Редактировать профиль</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
-              <Text style={styles.resetButtonText}>Сбросить профиль</Text>
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <Text style={styles.logoutButtonText}>Выйти из аккаунта</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -214,176 +355,361 @@ export function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFF',
+    backgroundColor: colors.background,
   },
-  content: {
-    padding: 20,
-  },
-  avatarContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#6200EE',
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: spacing.lg,
+    fontSize: 16,
+    color: colors.text.secondary,
+  },
+  content: {
+    padding: spacing.xl,
+  },
+
+  // Avatar Section
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
+  },
+  avatarGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    padding: 4,
+    ...shadows.medium,
+  },
+  avatarInner: {
+    flex: 1,
+    borderRadius: 56,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   avatarImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: '100%',
+    height: '100%',
   },
   avatarText: {
-    fontSize: 40,
-    color: '#FFF',
-    fontWeight: '600',
+    fontSize: 48,
+    color: colors.primary,
+    fontWeight: '700',
   },
   editBadge: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#FFF',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
+    bottom: 4,
+    right: 4,
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 3,
+    ...shadows.small,
   },
   editBadgeText: {
-    fontSize: 16,
-  },
-  level: {
     fontSize: 18,
-    color: '#6200EE',
-    fontWeight: '600',
-    marginTop: 12,
   },
-  form: {
-    marginTop: 8,
-  },
-  label: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#F5F5F5',
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  saveButton: {
-    backgroundColor: '#6200EE',
-  },
-  saveButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  info: {},
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  infoLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  infoValue: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  karmaBlock: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
-  },
-  karmaLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  karmaValue: {
+  userName: {
     fontSize: 24,
-    color: '#6200EE',
     fontWeight: '700',
+    color: colors.text.primary,
+    marginTop: spacing.lg,
   },
-  progressBlock: {
-    marginTop: 20,
-    padding: 16,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
+  levelBadge: {
+    backgroundColor: `${colors.primary}15`,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    marginTop: spacing.sm,
   },
-  progressText: {
+  levelText: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+
+  // Stats Section
+  statsContainer: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    alignItems: 'center',
+    ...shadows.small,
+  },
+  statCardPrimary: {
+    backgroundColor: colors.primary,
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.primary,
+  },
+  statValueKarma: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.inverse,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+  },
+  statLabelKarma: {
+    fontSize: 12,
+    color: colors.text.inverse,
+    marginTop: spacing.xs,
+    opacity: 0.9,
+  },
+
+  // Progress Section
+  progressSection: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    ...shadows.small,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  progressTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  progressRemaining: {
+    fontSize: 13,
+    color: colors.text.secondary,
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#DDD',
-    borderRadius: 4,
+    backgroundColor: colors.divider,
+    borderRadius: borderRadius.sm,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#6200EE',
-    borderRadius: 4,
+    borderRadius: borderRadius.sm,
+  },
+
+  // Achievements Section
+  achievementsSection: {
+    marginBottom: spacing.xl,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+  },
+  achievementsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  achievementCard: {
+    width: '47%',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    alignItems: 'center',
+    ...shadows.small,
+  },
+  achievementLocked: {
+    opacity: 0.5,
+  },
+  achievementIcon: {
+    fontSize: 32,
+    marginBottom: spacing.sm,
+  },
+  achievementTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  achievementTitleLocked: {
+    color: colors.text.tertiary,
+  },
+
+  // Form Styles
+  form: {
+    marginTop: spacing.md,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text.secondary,
+    marginBottom: spacing.sm,
+  },
+  input: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    fontSize: 16,
+    color: colors.text.primary,
+    marginBottom: spacing.lg,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+  },
+  button: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: colors.surfaceSecondary,
+  },
+  cancelButtonText: {
+    color: colors.text.secondary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: colors.primary,
+  },
+  saveButtonText: {
+    color: colors.text.inverse,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Info Display Styles
+  info: {},
+  infoCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    ...shadows.small,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  infoIcon: {
+    fontSize: 24,
+    marginRight: spacing.md,
+  },
+  infoContent: {
+    flex: 1,
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: colors.text.tertiary,
+    marginBottom: 2,
+  },
+  infoValue: {
+    fontSize: 16,
+    color: colors.text.primary,
+    fontWeight: '500',
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: colors.divider,
+    marginVertical: spacing.sm,
+    marginLeft: 40,
   },
   editButton: {
-    marginTop: 24,
-    backgroundColor: '#6200EE',
-    paddingVertical: 14,
-    borderRadius: 8,
+    marginTop: spacing.xl,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
     alignItems: 'center',
   },
   editButtonText: {
-    color: '#FFF',
+    color: colors.text.inverse,
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  resetButton: {
-    marginTop: 12,
-    paddingVertical: 14,
+  logoutButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  resetButtonText: {
-    color: '#F44336',
+  logoutButtonText: {
+    color: colors.error,
     fontSize: 14,
+    fontWeight: '500',
+  },
+
+  // Guest State Styles
+  guestContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xxxl,
+  },
+  guestAvatarWrapper: {
+    marginBottom: spacing.xl,
+  },
+  guestAvatarGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    padding: 4,
+    ...shadows.medium,
+  },
+  guestAvatarInner: {
+    flex: 1,
+    borderRadius: 56,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  guestAvatarText: {
+    fontSize: 48,
+    color: colors.text.tertiary,
+    fontWeight: '700',
+  },
+  guestTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  guestSubtitle: {
+    fontSize: 16,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: spacing.xl,
+  },
+  loginButton: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    ...shadows.medium,
+  },
+  loginButtonGradient: {
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xl,
+  },
+  loginButtonText: {
+    color: colors.text.inverse,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

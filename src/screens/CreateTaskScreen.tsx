@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,35 +8,91 @@ import {
   StyleSheet,
   Alert,
   Image,
+  Platform,
 } from 'react-native';
+
+// Cross-platform alert
+const showAlert = (title: string, message?: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(message ? `${title}\n\n${message}` : title);
+    onOk?.();
+  } else {
+    Alert.alert(title, message, [{ text: 'OK', onPress: onOk }]);
+  }
+};
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList, TaskCategory } from '../types';
+import type { RouteProp } from '@react-navigation/native';
+import type { RootStackParamList, MainTabParamList, TaskCategory, TaskUrgency } from '../types';
 import { createTask } from '../api';
 import { useImagePicker } from '../hooks';
-import { CATEGORY_ICONS, CATEGORY_LABELS } from '../utils/constants';
+import { useAuth } from '../contexts/AuthContext';
+import { CATEGORY_ICONS, CATEGORY_LABELS, URGENCY_LABELS, URGENCY_COLORS } from '../utils/constants';
+import { colors, spacing, borderRadius } from '../utils/theme';
 
+/**
+ * Props для CreateTaskScreen
+ *
+ * Поддерживает навигацию как из Stack Navigator, так и из Tab Navigator.
+ * Принимает опциональные параметры initialCategory и initialTitle
+ * для предзаполнения формы (например, из QuickActions).
+ */
 type Props = {
-  navigation: NativeStackNavigationProp<RootStackParamList>;
+  navigation: NativeStackNavigationProp<RootStackParamList, 'CreateTask'>;
+  route?: RouteProp<MainTabParamList, 'CreateTask'>;
 };
 
-const CATEGORIES: TaskCategory[] = ['delivery', 'tools', 'pets', 'other'];
+const CATEGORIES: TaskCategory[] = ['repair', 'delivery', 'pets', 'other'];
+const URGENCIES: TaskUrgency[] = ['low', 'medium', 'high', 'urgent'];
 
-export function CreateTaskScreen({ navigation }: Props) {
-  const [title, setTitle] = useState('');
+export function CreateTaskScreen({ navigation, route }: Props) {
+  const { user, isGuest, requireAuth } = useAuth();
+
+  // Получаем начальные значения из параметров навигации (если переданы)
+  const initialCategory = route?.params?.initialCategory ?? 'other';
+  const initialTitle = route?.params?.initialTitle ?? '';
+
+  const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<TaskCategory>('other');
+  const [category, setCategory] = useState<TaskCategory>(initialCategory);
+  const [urgency, setUrgency] = useState<TaskUrgency>('medium');
+  const [reward, setReward] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { imageUri, showPicker, clearImage } = useImagePicker();
 
+  /**
+   * Эффект для обновления формы при изменении параметров навигации
+   *
+   * Это нужно для случая, когда пользователь уже на экране CreateTask
+   * и нажимает на другое быстрое действие - форма должна обновиться.
+   */
+  useEffect(() => {
+    if (route?.params?.initialCategory) {
+      setCategory(route.params.initialCategory);
+    }
+    if (route?.params?.initialTitle !== undefined) {
+      setTitle(route.params.initialTitle);
+    }
+  }, [route?.params?.initialCategory, route?.params?.initialTitle]);
+
   const handleSubmit = async () => {
+    // Проверяем авторизацию - если гость, показываем модальное окно входа
+    if (!requireAuth()) {
+      return;
+    }
+
     if (!title.trim()) {
-      Alert.alert('Ошибка', 'Введите название задачи');
+      showAlert('Ошибка', 'Введите название задачи');
       return;
     }
 
     if (!description.trim()) {
-      Alert.alert('Ошибка', 'Введите описание задачи');
+      showAlert('Ошибка', 'Введите описание задачи');
+      return;
+    }
+
+    if (!user) {
+      // На случай если пользователь закрыл модальное окно
       return;
     }
 
@@ -46,13 +102,24 @@ export function CreateTaskScreen({ navigation }: Props) {
         title: title.trim(),
         description: description.trim(),
         category,
-        image_url: imageUri ?? undefined,
+        urgency,
+        reward: reward ? parseInt(reward, 10) : undefined,
+        imageUrl: imageUri ?? undefined,
+        authorId: user.id,
       });
-      Alert.alert('Успех', 'Задача создана!', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
-    } catch {
-      Alert.alert('Ошибка', 'Не удалось создать задачу');
+      showAlert('Успех', 'Задача создана!', () => {
+        // Сбрасываем форму и возвращаемся
+        setTitle('');
+        setDescription('');
+        setCategory('other');
+        setUrgency('medium');
+        setReward('');
+        clearImage();
+        navigation.goBack();
+      });
+    } catch (error) {
+      console.error('Create task error:', error);
+      showAlert('Ошибка', 'Не удалось создать задачу');
     } finally {
       setSubmitting(false);
     }
@@ -61,6 +128,16 @@ export function CreateTaskScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Баннер для гостевого режима */}
+        {isGuest && (
+          <TouchableOpacity style={styles.guestBanner} onPress={requireAuth}>
+            <Text style={styles.guestBannerText}>
+              Войдите, чтобы создать задачу
+            </Text>
+            <Text style={styles.guestBannerLink}>Войти</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.label}>Название</Text>
         <TextInput
           style={styles.input}
@@ -104,6 +181,46 @@ export function CreateTaskScreen({ navigation }: Props) {
             </TouchableOpacity>
           ))}
         </View>
+
+        <Text style={styles.label}>Срочность</Text>
+        <View style={styles.urgencyContainer}>
+          {URGENCIES.map((urg) => (
+            <TouchableOpacity
+              key={urg}
+              style={[
+                styles.urgencyButton,
+                urgency === urg && { backgroundColor: URGENCY_COLORS[urg] + '20', borderColor: URGENCY_COLORS[urg] },
+              ]}
+              onPress={() => setUrgency(urg)}
+            >
+              <View style={[styles.urgencyDot, { backgroundColor: URGENCY_COLORS[urg] }]} />
+              <Text
+                style={[
+                  styles.urgencyText,
+                  urgency === urg && { color: URGENCY_COLORS[urg], fontWeight: '600' },
+                ]}
+              >
+                {URGENCY_LABELS[urg]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.label}>Вознаграждение (опционально)</Text>
+        <View style={styles.rewardContainer}>
+          <TextInput
+            style={styles.rewardInput}
+            value={reward}
+            onChangeText={(text) => setReward(text.replace(/[^0-9]/g, ''))}
+            placeholder="0"
+            keyboardType="numeric"
+            maxLength={6}
+          />
+          <Text style={styles.rewardCurrency}>₽</Text>
+        </View>
+        <Text style={styles.rewardHint}>
+          Укажите сумму, если готовы отблагодарить за помощь
+        </Text>
 
         <Text style={styles.label}>Фото (опционально)</Text>
         {imageUri ? (
@@ -187,6 +304,55 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '500',
   },
+  urgencyContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  urgencyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    gap: 6,
+  },
+  urgencyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  urgencyText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  rewardContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  rewardInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  rewardCurrency: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+  },
+  rewardHint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 6,
+  },
   imageContainer: {
     position: 'relative',
     alignSelf: 'flex-start',
@@ -244,5 +410,25 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: '600',
+  },
+  guestBanner: {
+    backgroundColor: '#FFF3E0',
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  guestBannerText: {
+    fontSize: 14,
+    color: '#E65100',
+    flex: 1,
+  },
+  guestBannerLink: {
+    fontSize: 14,
+    color: '#6200EE',
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });

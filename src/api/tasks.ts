@@ -1,61 +1,163 @@
-import type { Task, TaskCategory } from '../types';
-import { mockTasks, mockUsers } from './mockData';
-import { API_DELAY } from '../utils/constants';
-import { generateId } from '../utils/helpers';
+/**
+ * tasks.ts - API функции для работы с задачами
+ *
+ * Использует HTTP клиент для запросов к бэкенду.
+ * Все функции асинхронные и возвращают Promise.
+ */
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import { api, ApiError } from './client';
+import type { Task, TaskCategory, TaskStatus, TaskUrgency } from '../types';
 
-export async function getTasks(): Promise<Task[]> {
-  await delay(API_DELAY);
-
-  const sortedTasks = [...mockTasks].sort((a, b) => {
-    if (a.status === 'open' && b.status !== 'open') return -1;
-    if (a.status !== 'open' && b.status === 'open') return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
-
-  return sortedTasks;
+// Типы ответов от сервера
+interface TasksResponse {
+  tasks: Task[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
-export async function getTaskById(id: string): Promise<Task> {
-  await delay(API_DELAY);
-
-  const task = mockTasks.find((t) => t.id === id);
-  if (!task) {
-    throw new Error(`Задача с ID ${id} не найдена`);
-  }
-
-  return task;
+interface CreateTaskData {
+  title: string;
+  description: string;
+  category: TaskCategory;
+  urgency?: TaskUrgency;
+  reward?: number;
+  imageUrl?: string;
+  authorId: string;
 }
 
-export async function getTaskCreatorName(creatorId: string): Promise<string> {
-  await delay(200);
-
-  const user = mockUsers.find((u) => u.id === creatorId);
-  return user?.name ?? 'Неизвестный сосед';
-}
-
-export async function createTask(
-  data: Omit<Task, 'id' | 'creator_id' | 'created_at' | 'status'>
-): Promise<Task> {
-  await delay(API_DELAY);
-
-  const newTask: Task = {
-    ...data,
-    id: generateId(),
-    creator_id: 'user-1',
-    status: 'open',
-    created_at: new Date().toISOString(),
-  };
-
-  mockTasks.unshift(newTask);
-  return newTask;
-}
-
-export async function getTasksByCategory(
-  category: TaskCategory
+/**
+ * Получить список всех задач
+ * @param category - фильтр по категории (опционально)
+ * @param status - фильтр по статусу (опционально)
+ */
+export async function getTasks(
+  category?: TaskCategory,
+  status?: TaskStatus
 ): Promise<Task[]> {
-  await delay(API_DELAY);
+  const params = new URLSearchParams();
+  if (category) params.append('category', category.toUpperCase());
+  if (status) params.append('status', status.toUpperCase());
 
-  return mockTasks.filter((t) => t.category === category);
+  const queryString = params.toString();
+  const endpoint = queryString ? `/tasks?${queryString}` : '/tasks';
+
+  const response = await api.get<TasksResponse>(endpoint);
+  return response.tasks.map(normalizeTask);
+}
+
+/**
+ * Получить задачу по ID
+ */
+export async function getTaskById(id: string): Promise<Task> {
+  const task = await api.get<Task>(`/tasks/${id}`);
+  return normalizeTask(task);
+}
+
+/**
+ * Создать новую задачу
+ */
+export async function createTask(data: CreateTaskData): Promise<Task> {
+  const task = await api.post<Task>('/tasks', {
+    ...data,
+    category: data.category.toUpperCase(),
+    urgency: data.urgency?.toUpperCase(),
+  });
+  return normalizeTask(task);
+}
+
+/**
+ * Обновить задачу
+ */
+export async function updateTask(
+  id: string,
+  data: Partial<Pick<Task, 'title' | 'description' | 'status' | 'reward'>>
+): Promise<Task> {
+  const task = await api.patch<Task>(`/tasks/${id}`, {
+    ...data,
+    status: data.status?.toUpperCase(),
+  });
+  return normalizeTask(task);
+}
+
+/**
+ * Удалить задачу
+ */
+export async function deleteTask(id: string): Promise<void> {
+  await api.delete(`/tasks/${id}`);
+}
+
+/**
+ * Откликнуться на задачу
+ */
+export async function respondToTask(
+  taskId: string,
+  userId: string,
+  message?: string
+): Promise<void> {
+  await api.post(`/tasks/${taskId}/respond`, { userId, message });
+}
+
+/**
+ * Получить задачи по категории
+ */
+export async function getTasksByCategory(category: TaskCategory): Promise<Task[]> {
+  return getTasks(category);
+}
+
+/**
+ * Получить задачи созданные пользователем
+ */
+export async function getUserTasks(userId: string): Promise<Task[]> {
+  const response = await api.get<TasksResponse>(`/tasks?authorId=${userId}`);
+  return response.tasks.map(normalizeTask);
+}
+
+/**
+ * Получить отклики пользователя (задачи на которые он откликнулся)
+ */
+export async function getUserResponses(userId: string): Promise<Task[]> {
+  try {
+    const response = await api.get<{ tasks: Task[] }>(`/users/${userId}/responses`);
+    return response.tasks.map(normalizeTask);
+  } catch {
+    // Fallback: если API не поддерживает, возвращаем пустой массив
+    return [];
+  }
+}
+
+/**
+ * Получить отклики на конкретную задачу
+ */
+export async function getTaskResponses(taskId: string): Promise<any[]> {
+  try {
+    const response = await api.get<{ responses: any[] }>(`/tasks/${taskId}/responses`);
+    return response.responses || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Нормализация данных задачи из API в формат фронтенда
+ * Бэкенд использует UPPER_CASE для enum, фронтенд - lower_case
+ */
+function normalizeTask(task: any): Task {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    category: task.category?.toLowerCase() as TaskCategory,
+    status: task.status?.toLowerCase() as TaskStatus,
+    urgency: task.urgency?.toLowerCase() as TaskUrgency | undefined,
+    reward: task.reward,
+    imageUrl: task.imageUrl,
+    image_url: task.imageUrl || task.image_url,
+    video_url: task.videoUrl || task.video_url,
+    creator_id: task.authorId || task.author?.id || task.creator_id,
+    created_at: task.createdAt || task.created_at,
+    author: task.author,
+    responses: task.responses,
+    _count: task._count,
+  };
 }

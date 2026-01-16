@@ -1,0 +1,85 @@
+// Prisma Schema - определение структуры базы данных
+// Prisma автоматически создаст таблицы и сгенерирует типизированный клиент
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === МОДЕЛИ ===
+
+// Пользователь системы
+model User {
+  id        String   @id @default(uuid())
+  phone     String   @unique              // Телефон для авторизации
+  password  String                         // Хеш пароля (bcrypt)
+  name      String                         // Имя пользователя
+  avatar    String?                        // URL аватара (опционально)
+  karma     Int      @default(0)           // Очки кармы
+  level     String   @default("Новичок")   // Уровень пользователя
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Связи
+  tasks     Task[]     @relation("TaskAuthor")    // Созданные задачи
+  responses Response[] @relation("ResponseUser")  // Отклики пользователя
+}
+
+// Задача (запрос о помощи)
+model Task {
+  id          String     @id @default(uuid())
+  title       String                           // Название задачи
+  description String                           // Описание
+  category    Category                         // Категория (enum)
+  status      TaskStatus @default(OPEN)        // Статус задачи
+  reward      Int?                             // Награда (опционально)
+  imageUrl    String?                          // Фото задачи
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Связи
+  authorId  String
+  author    User       @relation("TaskAuthor", fields: [authorId], references: [id])
+  responses Response[]                         // Отклики на задачу
+}
+
+// Отклик на задачу
+model Response {
+  id        String         @id @default(uuid())
+  message   String?                             // Сообщение от откликнувшегося
+  status    ResponseStatus @default(PENDING)   // Статус отклика
+  createdAt DateTime       @default(now())
+
+  // Связи
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation("ResponseUser", fields: [userId], references: [id])
+
+  @@unique([taskId, userId]) // Один пользователь - один отклик на задачу
+}
+
+// === ENUMS ===
+
+enum Category {
+  REPAIR    // Ремонт
+  DELIVERY  // Доставка
+  PETS      // Питомцы
+  OTHER     // Другое
+}
+
+enum TaskStatus {
+  OPEN        // Открыта
+  IN_PROGRESS // В работе
+  COMPLETED   // Завершена
+}
+
+enum ResponseStatus {
+  PENDING   // Ожидает
+  ACCEPTED  // Принят
+  REJECTED  // Отклонён
+}

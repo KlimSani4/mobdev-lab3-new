@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#6200EE" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Соседи+" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Соседи+" />
+    <meta name="msapplication-TileColor" content="#6200EE" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <!-- SEO -->
+    <meta name="description" content="Соседи+ - приложение соседской взаимопомощи. Помогайте соседям и получайте помощь!" />
+    <meta name="keywords" content="соседи, помощь, взаимопомощь, сообщество" />
+
+    <title>Соседи+</title>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/assets/icon-192.png" />
+
+    <!-- Styles -->
+    <style id="expo-reset">
+      html, body, #root { width: 100%; height: 100%; }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overflow: hidden;
+      }
+      #root { display: flex; flex-direction: column; }
+
+      /* PWA Install Banner */
+      .pwa-install-banner {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(135deg, #6200EE 0%, #7C4DFF 100%);
+        color: white;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        z-index: 9999;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+      }
+      .pwa-install-banner.show { transform: translateY(0); }
+      .pwa-install-banner .text { flex: 1; }
+      .pwa-install-banner .title { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+      .pwa-install-banner .subtitle { font-size: 13px; opacity: 0.9; }
+      .pwa-install-banner button {
+        background: white;
+        color: #6200EE;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-left: 12px;
+      }
+      .pwa-install-banner .close {
+        background: transparent;
+        color: white;
+        padding: 8px;
+        margin-left: 8px;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- PWA Install Banner -->
+    <div id="pwa-banner" class="pwa-install-banner">
+      <div class="text">
+        <div class="title">Установить Соседи+</div>
+        <div class="subtitle">Добавьте на главный экран для быстрого доступа</div>
+      </div>
+      <button id="pwa-install">Установить</button>
+      <button class="close" id="pwa-close">✕</button>
+    </div>
+
+    <script>
+      // Регистрация Service Worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then((reg) => console.log('SW registered:', reg.scope))
+            .catch((err) => console.log('SW registration failed:', err));
+        });
+      }
+
+      // PWA Install Prompt
+      let deferredPrompt;
+      const banner = document.getElementById('pwa-banner');
+      const installBtn = document.getElementById('pwa-install');
+      const closeBtn = document.getElementById('pwa-close');
+
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Показываем баннер через 3 секунды
+        setTimeout(() => banner.classList.add('show'), 3000);
+      });
+
+      installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('Install outcome:', outcome);
+        deferredPrompt = null;
+        banner.classList.remove('show');
+      });
+
+      closeBtn.addEventListener('click', () => {
+        banner.classList.remove('show');
+        // Запоминаем что закрыли
+        localStorage.setItem('pwa-banner-dismissed', Date.now());
+      });
+
+      // Не показываем если уже установлено или закрыто недавно
+      if (window.matchMedia('(display-mode: standalone)').matches) {
+        banner.style.display = 'none';
+      }
+      const dismissed = localStorage.getItem('pwa-banner-dismissed');
+      if (dismissed && Date.now() - parseInt(dismissed) < 86400000) {
+        banner.style.display = 'none';
+      }
+    </script>
+  </body>
+</html>

@@ -1,3 +1,15 @@
+/**
+ * VideoPlayer - компонент для воспроизведения видео
+ *
+ * Использует expo-av для работы с мультимедиа.
+ * Демонстрирует:
+ * - useRef для императивного управления Video компонентом
+ * - Кастомный UI поверх видео (оверлей с кнопкой play)
+ * - Отслеживание статуса воспроизведения
+ *
+ * @param uri - URL видеофайла
+ * @param style - дополнительные стили контейнера
+ */
 import React, { useState, useRef } from 'react';
 import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -8,24 +20,38 @@ interface VideoPlayerProps {
 }
 
 export function VideoPlayer({ uri, style }: VideoPlayerProps) {
+  // useRef создаёт ссылку на Video компонент для императивного управления
+  // В отличие от useState, изменение ref не вызывает перерендер
   const videoRef = useRef<Video>(null);
+
+  // Состояние воспроизведения
   const [isPlaying, setIsPlaying] = useState(false);
+  // Состояние загрузки видео
   const [isLoaded, setIsLoaded] = useState(false);
 
+  /**
+   * Колбэк для отслеживания статуса воспроизведения
+   * Вызывается при каждом изменении состояния видео
+   */
   const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+    // Проверяем, что видео загружено (isLoaded есть только у загруженного видео)
     if (status.isLoaded) {
       setIsLoaded(true);
       setIsPlaying(status.isPlaying);
     }
   };
 
+  /**
+   * Переключение воспроизведения (play/pause)
+   * Использует ref для прямого вызова методов Video компонента
+   */
   const togglePlayback = async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current) return; // Защита от null
 
     if (isPlaying) {
-      await videoRef.current.pauseAsync();
+      await videoRef.current.pauseAsync(); // Императивная пауза
     } else {
-      await videoRef.current.playAsync();
+      await videoRef.current.playAsync();  // Императивный запуск
     }
   };
 
